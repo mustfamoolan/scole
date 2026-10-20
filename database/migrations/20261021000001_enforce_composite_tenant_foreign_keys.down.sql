@@ -1,0 +1,70 @@
+-- Migration: enforce_composite_tenant_foreign_keys
+-- Down
+
+-- Drop composite foreign keys
+ALTER TABLE teacher_payout_accruals DROP CONSTRAINT IF EXISTS fk_payouts_session_tenant;
+ALTER TABLE teacher_payout_accruals DROP CONSTRAINT IF EXISTS fk_payouts_teacher_tenant;
+ALTER TABLE session_packages DROP CONSTRAINT IF EXISTS fk_session_packages_payment_tenant;
+ALTER TABLE session_packages DROP CONSTRAINT IF EXISTS fk_session_packages_policy_tenant;
+ALTER TABLE session_packages DROP CONSTRAINT IF EXISTS fk_session_packages_student_tenant;
+ALTER TABLE refund_transactions DROP CONSTRAINT IF EXISTS fk_refunds_accrual_tenant;
+ALTER TABLE refund_transactions DROP CONSTRAINT IF EXISTS fk_refunds_original_payment_tenant;
+ALTER TABLE payment_allocations DROP CONSTRAINT IF EXISTS fk_payment_alloc_accrual_tenant;
+ALTER TABLE payment_allocations DROP CONSTRAINT IF EXISTS fk_payment_alloc_txn_tenant;
+ALTER TABLE scholarship_discounts DROP CONSTRAINT IF EXISTS fk_scholarships_accrual_tenant;
+ALTER TABLE charge_accruals DROP CONSTRAINT IF EXISTS fk_charge_accruals_policy_tenant;
+ALTER TABLE charge_accruals DROP CONSTRAINT IF EXISTS fk_charge_accruals_enrollment_tenant;
+ALTER TABLE charge_accruals DROP CONSTRAINT IF EXISTS fk_charge_accruals_student_tenant;
+ALTER TABLE behavior_incidents DROP CONSTRAINT IF EXISTS fk_behavior_student_tenant;
+ALTER TABLE grade_audit_logs DROP CONSTRAINT IF EXISTS fk_grade_audit_logs_record_tenant;
+ALTER TABLE student_grade_records DROP CONSTRAINT IF EXISTS fk_student_grades_student_tenant;
+ALTER TABLE student_grade_records DROP CONSTRAINT IF EXISTS fk_student_grades_item_tenant;
+ALTER TABLE assessment_items DROP CONSTRAINT IF EXISTS fk_assessment_items_cohort_tenant;
+ALTER TABLE assessment_items DROP CONSTRAINT IF EXISTS fk_assessment_items_section_tenant;
+ALTER TABLE assessment_items DROP CONSTRAINT IF EXISTS fk_assessment_items_plan_tenant;
+ALTER TABLE assessment_plans DROP CONSTRAINT IF EXISTS fk_assessment_plans_term_tenant;
+ALTER TABLE assessment_plans DROP CONSTRAINT IF EXISTS fk_assessment_plans_curriculum_tenant;
+ALTER TABLE attendance_records DROP CONSTRAINT IF EXISTS fk_attendance_session_tenant;
+ALTER TABLE attendance_records DROP CONSTRAINT IF EXISTS fk_attendance_student_tenant;
+ALTER TABLE actual_class_sessions DROP CONSTRAINT IF EXISTS fk_actual_sessions_substitute_tenant;
+ALTER TABLE actual_class_sessions DROP CONSTRAINT IF EXISTS fk_actual_sessions_assignment_tenant;
+ALTER TABLE actual_class_sessions DROP CONSTRAINT IF EXISTS fk_actual_sessions_slot_tenant;
+ALTER TABLE planned_schedule_slots DROP CONSTRAINT IF EXISTS fk_schedule_slots_assignment_tenant;
+ALTER TABLE teacher_assignments DROP CONSTRAINT IF EXISTS fk_teacher_assignments_cohort_tenant;
+ALTER TABLE teacher_assignments DROP CONSTRAINT IF EXISTS fk_teacher_assignments_section_tenant;
+ALTER TABLE teacher_assignments DROP CONSTRAINT IF EXISTS fk_teacher_assignments_curriculum_tenant;
+ALTER TABLE teacher_assignments DROP CONSTRAINT IF EXISTS fk_teacher_assignments_teacher_tenant;
+ALTER TABLE adopted_curricula DROP CONSTRAINT IF EXISTS fk_adopted_curricula_cycle_tenant;
+ALTER TABLE adopted_curricula DROP CONSTRAINT IF EXISTS fk_adopted_curricula_cohort_tenant;
+ALTER TABLE adopted_curricula DROP CONSTRAINT IF EXISTS fk_adopted_curricula_grade_tenant;
+ALTER TABLE enrollment_status_histories DROP CONSTRAINT IF EXISTS fk_enrollment_histories_tenant;
+ALTER TABLE academic_enrollments DROP CONSTRAINT IF EXISTS fk_enrollments_cohort_tenant;
+ALTER TABLE academic_enrollments DROP CONSTRAINT IF EXISTS fk_enrollments_section_tenant;
+ALTER TABLE academic_enrollments DROP CONSTRAINT IF EXISTS fk_enrollments_term_tenant;
+ALTER TABLE academic_enrollments DROP CONSTRAINT IF EXISTS fk_enrollments_student_tenant;
+ALTER TABLE study_cohorts DROP CONSTRAINT IF EXISTS fk_study_cohorts_program_tenant;
+ALTER TABLE class_sections DROP CONSTRAINT IF EXISTS fk_class_sections_grade_tenant;
+ALTER TABLE study_grades DROP CONSTRAINT IF EXISTS fk_study_grades_program_tenant;
+ALTER TABLE academic_terms DROP CONSTRAINT IF EXISTS fk_academic_terms_cycle_tenant;
+ALTER TABLE guardian_student_relations DROP CONSTRAINT IF EXISTS fk_guardian_student_profiles_tenant;
+
+-- Drop unique tenant constraints
+ALTER TABLE payment_transactions DROP CONSTRAINT IF EXISTS uq_payment_transactions_tenant_id;
+ALTER TABLE charge_accruals DROP CONSTRAINT IF EXISTS uq_charge_accruals_tenant_id;
+ALTER TABLE fee_policies DROP CONSTRAINT IF EXISTS uq_fee_policies_tenant_id;
+ALTER TABLE student_grade_records DROP CONSTRAINT IF EXISTS uq_student_grade_records_tenant_id;
+ALTER TABLE assessment_items DROP CONSTRAINT IF EXISTS uq_assessment_items_tenant_id;
+ALTER TABLE assessment_plans DROP CONSTRAINT IF EXISTS uq_assessment_plans_tenant_id;
+ALTER TABLE actual_class_sessions DROP CONSTRAINT IF EXISTS uq_actual_class_sessions_tenant_id;
+ALTER TABLE planned_schedule_slots DROP CONSTRAINT IF EXISTS uq_planned_schedule_slots_tenant_id;
+ALTER TABLE teacher_assignments DROP CONSTRAINT IF EXISTS uq_teacher_assignments_tenant_id;
+ALTER TABLE adopted_curricula DROP CONSTRAINT IF EXISTS uq_adopted_curricula_tenant_id;
+ALTER TABLE academic_enrollments DROP CONSTRAINT IF EXISTS uq_academic_enrollments_tenant_id;
+ALTER TABLE study_cohorts DROP CONSTRAINT IF EXISTS uq_study_cohorts_tenant_id;
+ALTER TABLE class_sections DROP CONSTRAINT IF EXISTS uq_class_sections_tenant_id;
+ALTER TABLE study_grades DROP CONSTRAINT IF EXISTS uq_study_grades_tenant_id;
+ALTER TABLE educational_programs DROP CONSTRAINT IF EXISTS uq_educational_programs_tenant_id;
+ALTER TABLE academic_terms DROP CONSTRAINT IF EXISTS uq_academic_terms_tenant_id;
+ALTER TABLE academic_cycles DROP CONSTRAINT IF EXISTS uq_academic_cycles_tenant_id;
+ALTER TABLE teacher_profiles DROP CONSTRAINT IF EXISTS uq_teacher_profiles_tenant_id;
+ALTER TABLE student_profiles DROP CONSTRAINT IF EXISTS uq_student_profiles_tenant_id;
