@@ -2480,6 +2480,270 @@ func (ctrl *AcademicController) TeacherCodeLogin(c *fiber.Ctx) error {
 	})
 }
 
+// GetPortalTeacherStudents returns the real students of the institute for the teacher portal.
+func (ctrl *AcademicController) GetPortalTeacherStudents(c *fiber.Ctx) error {
+	tenant := middleware.GetTenant(c)
+	if tenant == nil {
+		slug := c.Get("X-Tenant-Slug")
+		if slug == "" {
+			slug = c.Query("slug")
+		}
+		if slug != "" {
+			var t models.Tenant
+			if err := ctrl.db.WithContext(c.UserContext()).Where("slug = ?", slug).First(&t).Error; err == nil {
+				tenant = &t
+			}
+		}
+	}
+
+	teacherIDStr := c.Query("teacher_id")
+	var teacherID *uuid.UUID
+	if tID, err := uuid.Parse(teacherIDStr); err == nil {
+		teacherID = &tID
+	}
+
+	if tenant == nil && teacherID != nil {
+		var tp models.TeacherProfile
+		if err := ctrl.db.WithContext(c.UserContext()).Where("id = ?", *teacherID).First(&tp).Error; err == nil {
+			var t models.Tenant
+			if errT := ctrl.db.WithContext(c.UserContext()).Where("id = ?", tp.TenantID).First(&t).Error; errT == nil {
+				tenant = &t
+			}
+		}
+	}
+
+	if tenant == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Tenant context is required",
+		})
+	}
+
+	// 1. Fetch active students in this tenant
+	var students []models.StudentProfile
+	query := ctrl.db.WithContext(c.UserContext()).
+		Where("tenant_id = ?", tenant.ID).
+		Preload("Person").
+		Order("created_at DESC")
+
+	if err := query.Find(&students).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch students",
+		})
+	}
+
+	studentIDs := make([]uuid.UUID, 0, len(students))
+	for _, s := range students {
+		studentIDs = append(studentIDs, s.ID)
+	}
+
+	// 2. Map enrollments for grade & section
+	enrollmentMap := make(map[uuid.UUID]models.AcademicEnrollment)
+	if len(studentIDs) > 0 {
+		var enrollments []models.AcademicEnrollment
+		if errE := ctrl.db.WithContext(c.UserContext()).
+			Where("tenant_id = ? AND student_profile_id IN ? AND status = 'active'", tenant.ID, studentIDs).
+			Preload("ClassSection").
+			Order("created_at DESC").
+			Find(&enrollments).Error; errE == nil {
+			for _, en := range enrollments {
+				if _, exists := enrollmentMap[en.StudentProfileID]; !exists {
+					enrollmentMap[en.StudentProfileID] = en
+				}
+			}
+		}
+	}
+
+	var grades []models.StudyGrade
+	_ = ctrl.db.WithContext(c.UserContext()).Where("tenant_id = ?", tenant.ID).Find(&grades).Error
+	gradeNameMap := make(map[uuid.UUID]string)
+	for _, g := range grades {
+		gradeNameMap[g.ID] = g.Name
+	}
+
+	// 3. Count homeworks and unseens
+	type HwCount struct {
+		StudentProfileID uuid.UUID `gorm:"column:student_profile_id"`
+		TotalCount       int       `gorm:"column:total_count"`
+		UnseenCount      int       `gorm:"column:unseen_count"`
+	}
+	var hwStats []HwCount
+	_ = ctrl.db.WithContext(c.UserContext()).
+		Table("student_school_homeworks").
+		Select("student_profile_id, count(*) as total_count, sum(case when is_seen = false then 1 else 0 end) as unseen_count").
+		Where("tenant_id = ?", tenant.ID).
+		Group("student_profile_id").
+		Scan(&hwStats).Error
+
+	hwMap := make(map[uuid.UUID]HwCount)
+	for _, stat := range hwStats {
+		hwMap[stat.StudentProfileID] = stat
+	}
+
+	type StudentItemDTO struct {
+		ID             uuid.UUID `json:"id"`
+		Name           string    `json:"name"`
+		Code           string    `json:"code"`
+		StudentNumber  string    `json:"student_number"`
+		Grade          string    `json:"grade"`
+		Section        string    `json:"section"`
+		HomeworksCount int       `json:"homeworksCount"`
+		UnseenCount    int       `json:"unseenCount"`
+	}
+
+	result := make([]StudentItemDTO, 0, len(students))
+	for _, s := range students {
+		grName := "عام"
+		secName := "عام"
+		if en, ok := enrollmentMap[s.ID]; ok && en.ClassSection != nil {
+			secName = en.ClassSection.Name
+			if gName, gOk := gradeNameMap[en.ClassSection.StudyGradeID]; gOk {
+				grName = gName
+			}
+		}
+
+		stat := hwMap[s.ID]
+		result = append(result, StudentItemDTO{
+			ID:             s.ID,
+			Name:           s.Person.FullName(),
+			Code:           s.AccessCode,
+			StudentNumber:  s.StudentNumber,
+			Grade:          grName,
+			Section:        secName,
+			HomeworksCount: stat.TotalCount,
+			UnseenCount:    stat.UnseenCount,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    result,
+	})
+}
+
+// GetPortalStudentTeachers returns the real active teachers of the student/institute for student/guardian portals.
+func (ctrl *AcademicController) GetPortalStudentTeachers(c *fiber.Ctx) error {
+	tenant := middleware.GetTenant(c)
+	if tenant == nil {
+		slug := c.Get("X-Tenant-Slug")
+		if slug == "" {
+			slug = c.Query("slug")
+		}
+		if slug != "" {
+			var t models.Tenant
+			if err := ctrl.db.WithContext(c.UserContext()).Where("slug = ?", slug).First(&t).Error; err == nil {
+				tenant = &t
+			}
+		}
+	}
+
+	studentIDStr := c.Query("student_id")
+	var studentID *uuid.UUID
+	if sID, err := uuid.Parse(studentIDStr); err == nil {
+		studentID = &sID
+	}
+
+	if tenant == nil && studentID != nil {
+		var st models.StudentProfile
+		if err := ctrl.db.WithContext(c.UserContext()).Where("id = ?", *studentID).First(&st).Error; err == nil {
+			var t models.Tenant
+			if errT := ctrl.db.WithContext(c.UserContext()).Where("id = ?", st.TenantID).First(&t).Error; errT == nil {
+				tenant = &t
+			}
+		}
+	}
+
+	if tenant == nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Tenant context is required",
+		})
+	}
+
+	var teachers []models.TeacherProfile
+	if err := ctrl.db.WithContext(c.UserContext()).
+		Where("tenant_id = ? AND status = 'active'", tenant.ID).
+		Preload("Person").
+		Preload("Person.CommunicationChannels").
+		Order("created_at ASC").
+		Find(&teachers).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to fetch teachers",
+		})
+	}
+
+	var assignments []models.TeacherAssignment
+	_ = ctrl.db.WithContext(c.UserContext()).
+		Where("tenant_id = ? AND status = 'active'", tenant.ID).
+		Preload("AdoptedCurriculum.CurriculumEdition.Definition.Subject").
+		Preload("AdoptedCurriculum.StudyGrade").
+		Find(&assignments).Error
+
+	teacherSubjectMap := make(map[uuid.UUID]string)
+	for _, a := range assignments {
+		subName := a.AdoptedCurriculum.CurriculumEdition.Definition.Subject.Name
+		if subName == "" {
+			subName = a.AdoptedCurriculum.CurriculumEdition.Definition.Name
+		}
+		if subName != "" {
+			if existing, ok := teacherSubjectMap[a.TeacherProfileID]; ok {
+				if !strings.Contains(existing, subName) {
+					teacherSubjectMap[a.TeacherProfileID] = existing + "، " + subName
+				}
+			} else {
+				teacherSubjectMap[a.TeacherProfileID] = subName
+			}
+		}
+	}
+
+	type TeacherDTO struct {
+		ID             uuid.UUID `json:"id"`
+		Name           string    `json:"name"`
+		Subject        string    `json:"subject"`
+		Specialization string    `json:"specialization,omitempty"`
+		Phone          string    `json:"phone,omitempty"`
+		AvatarURL      *string   `json:"avatar_url,omitempty"`
+	}
+
+	result := make([]TeacherDTO, 0, len(teachers))
+	for _, t := range teachers {
+		phone := ""
+		for _, ch := range t.Person.CommunicationChannels {
+			if ch.ChannelType == "phone" && (phone == "" || ch.IsPrimary) {
+				phone = ch.ChannelValue
+			}
+		}
+		sub := teacherSubjectMap[t.ID]
+		if sub == "" {
+			if t.Specialization != nil && *t.Specialization != "" {
+				sub = *t.Specialization
+			} else {
+				sub = "كادر التدريس"
+			}
+		}
+		tName := t.Person.FullName()
+		if !strings.HasPrefix(tName, "أ.") && !strings.HasPrefix(tName, "ست") {
+			tName = "أ. " + tName
+		}
+
+		result = append(result, TeacherDTO{
+			ID:             t.ID,
+			Name:           tName,
+			Subject:        sub,
+			Specialization: sub,
+			Phone:          phone,
+			AvatarURL:      t.Person.AvatarURL,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    result,
+	})
+}
+
 
 
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"institute/app/models"
@@ -519,20 +520,48 @@ func (s *HomeworkService) GetSchoolHomeworksFeed(ctx context.Context, tenantID u
 		query = query.Where("student_school_homeworks.subject_name ILIKE ?", "%"+subjectName+"%")
 	}
 
-	// If teacher profile is passed and no specific section is forced, filter to sections taught by teacher
+	// If teacher profile is passed and no specific section is forced, filter to sections, grades, or subjects taught by teacher
 	if teacherProfileID != nil && sectionID == nil {
 		var assignments []models.TeacherAssignment
 		if err := s.db.WithContext(ctx).
 			Where("tenant_id = ? AND teacher_profile_id = ? AND status = 'active'", tenantID, *teacherProfileID).
+			Preload("AdoptedCurriculum.CurriculumEdition.Definition.Subject").
 			Find(&assignments).Error; err == nil && len(assignments) > 0 {
 			var sectionIDs []uuid.UUID
+			var gradeIDs []uuid.UUID
+			var subjectNames []string
 			for _, a := range assignments {
 				if a.ClassSectionID != nil {
 					sectionIDs = append(sectionIDs, *a.ClassSectionID)
 				}
+				if a.AdoptedCurriculum.StudyGradeID != nil {
+					gradeIDs = append(gradeIDs, *a.AdoptedCurriculum.StudyGradeID)
+				}
+				subName := a.AdoptedCurriculum.CurriculumEdition.Definition.Subject.Name
+				if subName != "" {
+					subjectNames = append(subjectNames, subName)
+				}
 			}
+
+			var conditions []string
+			var condArgs []interface{}
 			if len(sectionIDs) > 0 {
-				query = query.Where("student_school_homeworks.class_section_id IN ?", sectionIDs)
+				conditions = append(conditions, "student_school_homeworks.class_section_id IN ?")
+				condArgs = append(condArgs, sectionIDs)
+			}
+			if len(gradeIDs) > 0 {
+				conditions = append(conditions, "student_school_homeworks.study_grade_id IN ?")
+				condArgs = append(condArgs, gradeIDs)
+			}
+			if len(subjectNames) > 0 {
+				for _, sn := range subjectNames {
+					conditions = append(conditions, "student_school_homeworks.subject_name ILIKE ?")
+					condArgs = append(condArgs, "%"+sn+"%")
+				}
+			}
+
+			if len(conditions) > 0 {
+				query = query.Where(strings.Join(conditions, " OR "), condArgs...)
 			}
 		}
 	}

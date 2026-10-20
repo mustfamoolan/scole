@@ -126,32 +126,73 @@ export const TeacherMobileApp: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Full Roster of Students (Even students who haven't submitted appear automatically!)
-  const allStudentsRoster: StudentRosterItem[] = useMemo(() => {
-    const baseList: { id: string; name: string; code: string; grade: string; section: string }[] = [
-      { id: 'stu-1', name: 'علي كرار حيدر', code: 'STU-1021', grade: 'الثالث المتوسط', section: 'أ' },
-      { id: 'stu-2', name: 'سارة محمد جاسم', code: 'STU-1022', grade: 'الثالث المتوسط', section: 'أ' },
-      { id: 'stu-3', name: 'حسين قاسم عبد', code: 'STU-1023', grade: 'الثالث المتوسط', section: 'ب' },
-      { id: 'stu-4', name: 'زينب عباس علي', code: 'STU-1024', grade: 'الثالث المتوسط', section: 'أ' },
-      { id: 'stu-5', name: 'يوسف أحمد كريم', code: 'STU-1025', grade: 'الثالث المتوسط', section: 'ب' },
-      { id: 'stu-6', name: 'مريم عمار فاضل', code: 'STU-1026', grade: 'الثالث المتوسط', section: 'أ' },
-      { id: 'stu-7', name: 'حسن ثائر صالح', code: 'STU-1027', grade: 'الثالث المتوسط', section: 'ب' },
-      { id: 'stu-8', name: 'فاطمة جواد كاظم', code: 'STU-1028', grade: 'الثالث المتوسط', section: 'أ' },
-    ];
+  // Real students roster state from server
+  const [realStudents, setRealStudents] = useState<StudentRosterItem[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState<boolean>(false);
 
-    // Compute homeworks count & unseen count from current feed
-    return baseList.map((stu) => {
-      const studentHws = schoolHomeworks.filter(
-        (h) => h.student_profile_id === stu.id || h.student_profile?.full_name?.includes(stu.name)
-      );
-      const unseen = studentHws.filter((h) => !h.is_seen).length;
-      return {
-        ...stu,
-        homeworksCount: studentHws.length,
-        unseenCount: unseen,
-      };
+  // Fetch real students belonging to this teacher/tenant
+  const fetchStudents = async () => {
+    if (!session?.teacher?.id) return;
+    setLoadingStudents(true);
+    try {
+      const endpoint = detectedSlug
+        ? `/api/v1/portal/teacher/students?slug=${encodeURIComponent(detectedSlug)}&teacher_id=${session.teacher.id}`
+        : `/api/v1/portal/teacher/students?teacher_id=${session.teacher.id}`;
+      const res = await apiRequest<{ success: boolean; data: StudentRosterItem[] }>(endpoint, {
+        headers: detectedSlug ? { 'X-Tenant-Slug': detectedSlug } : undefined,
+      });
+      if (res?.data && Array.isArray(res.data)) {
+        setRealStudents(res.data);
+      }
+    } catch {
+      // Graceful fallback
+    } finally {
+      setLoadingStudents(false);
+    }
+  };
+
+  // Full Roster of Students (Derived from real students + live homework counts)
+  const allStudentsRoster: StudentRosterItem[] = useMemo(() => {
+    if (realStudents.length > 0) {
+      return realStudents.map((stu) => {
+        const studentHws = schoolHomeworks.filter(
+          (h) => h.student_profile_id === stu.id || h.student_profile?.full_name?.includes(stu.name)
+        );
+        const unseen = studentHws.filter((h) => !h.is_seen).length;
+        return {
+          ...stu,
+          homeworksCount: Math.max(stu.homeworksCount || 0, studentHws.length),
+          unseenCount: Math.max(stu.unseenCount || 0, unseen),
+        };
+      });
+    }
+
+    // Dynamic map from homeworks if students list hasn't loaded yet
+    const studentMap = new Map<string, StudentRosterItem>();
+    schoolHomeworks.forEach((h) => {
+      const sId = h.student_profile_id;
+      const sName = h.student_profile?.full_name || 'طالب';
+      const sCode = h.student_profile?.student_number || 'STU';
+      const sGrade = h.study_grade?.name || 'صف عام';
+      const sSec = h.class_section?.name || 'شعبة عامة';
+      if (!studentMap.has(sId)) {
+        studentMap.set(sId, {
+          id: sId,
+          name: sName,
+          code: sCode,
+          grade: sGrade,
+          section: sSec,
+          homeworksCount: 0,
+          unseenCount: 0,
+        });
+      }
+      const entry = studentMap.get(sId)!;
+      entry.homeworksCount++;
+      if (!h.is_seen) entry.unseenCount++;
     });
-  }, [schoolHomeworks]);
+
+    return Array.from(studentMap.values());
+  }, [realStudents, schoolHomeworks]);
 
   // Filtered Students Roster
   const filteredStudents = useMemo(() => {
@@ -166,33 +207,32 @@ export const TeacherMobileApp: React.FC = () => {
     });
   }, [allStudentsRoster, studentSearchQuery, studentFilter]);
 
-  // Direct Teacher-to-Parent/Student Chat List (Mockup Tab 2)
-  const teacherDirectChats = [
-    {
-      id: 'chat-1',
-      participantName: 'ولي أمر علي كرار',
-      relation: 'والد الطالب علي كرار',
-      lastMessage: 'السلام عليكم أستاذ، رفعنا واجب الرياضيات والفيزياء.',
-      time: '10:45 ص',
-      unread: 1,
-    },
-    {
-      id: 'chat-2',
-      participantName: 'سارة محمد جاسم',
-      relation: 'طالبة - الثالث المتوسط أ',
-      lastMessage: 'أستاذ حليت المسألة ص 45 مثل ما وضحت حضرتك.',
-      time: '09:20 ص',
-      unread: 0,
-    },
-    {
-      id: 'chat-3',
-      participantName: 'ولي أمر يوسف أحمد',
-      relation: 'والدة الطالب يوسف أحمد',
-      lastMessage: 'شكراً جزيلاً أستاذ لمتابعتك المستمرة.',
-      time: 'أمس',
-      unread: 0,
-    },
-  ];
+  // Real Direct Teacher-to-Parent/Student Chat List from Roster
+  const teacherDirectChats = useMemo(() => {
+    return allStudentsRoster.map((stu) => {
+      const studentHws = schoolHomeworks.filter(
+        (h) => h.student_profile_id === stu.id || h.student_profile?.full_name?.includes(stu.name)
+      );
+      const latestHw = studentHws[0];
+      let lastMsg = 'لا توجد محادثات سابقة';
+      let timeStr = 'اليوم';
+      if (latestHw) {
+        lastMsg = latestHw.teacher_comment
+          ? `ردك: ${latestHw.teacher_comment}`
+          : latestHw.title || 'رفع واجباً دراسياً';
+        timeStr = new Date(latestHw.created_at).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+      }
+      return {
+        id: stu.id,
+        participantName: stu.name,
+        relation: `طالب - ${stu.grade} (${stu.section})`,
+        lastMessage: lastMsg,
+        time: timeStr,
+        unread: stu.unseenCount,
+        student: stu,
+      };
+    });
+  }, [allStudentsRoster, schoolHomeworks]);
 
   // 1. Fetch Tenant Context
   useEffect(() => {
@@ -258,62 +298,20 @@ export const TeacherMobileApp: React.FC = () => {
       const res = await apiRequest<{ success: boolean; data: StudentSchoolHomework[] }>(endpoint, {
         headers: detectedSlug ? { 'X-Tenant-Slug': detectedSlug } : undefined,
       });
-      if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+      if (res?.data && Array.isArray(res.data)) {
         setSchoolHomeworks(res.data);
       } else {
-        // Fallback seed data for testing
-        setSchoolHomeworks([
-          {
-            id: 'sample-hw-1',
-            tenant_id: 'default',
-            student_profile_id: 'stu-1',
-            subject_name: 'الرياضيات',
-            title: 'حل تمارين المعادلات الخطية صفحة 45',
-            description: 'تم حل المسألة رقم 1 و 2 و 4 و 5 في الدفتر بوضوح.',
-            images: JSON.stringify([
-              'https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=600&q=80',
-            ]),
-            submitted_by: 'student',
-            is_seen: false,
-            created_at: new Date(Date.now() - 3600000).toISOString(),
-            updated_at: new Date(Date.now() - 3600000).toISOString(),
-            student_profile: {
-              id: 'stu-1',
-              student_number: 'STU-1021',
-              full_name: 'علي كرار حيدر',
-            } as any,
-          } as unknown as StudentSchoolHomework,
-          {
-            id: 'sample-hw-2',
-            tenant_id: 'default',
-            student_profile_id: 'stu-2',
-            subject_name: 'الرياضيات',
-            title: 'حل تمارين ص 48',
-            description: 'تم إكمال الواجب بالكامل.',
-            images: JSON.stringify([
-              'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=600&q=80',
-            ]),
-            submitted_by: 'guardian',
-            is_seen: true,
-            teacher_comment: 'ممتاز يا سارة، بارك الله فيكِ.',
-            created_at: new Date(Date.now() - 7200000).toISOString(),
-            updated_at: new Date(Date.now() - 7200000).toISOString(),
-            student_profile: {
-              id: 'stu-2',
-              student_number: 'STU-1022',
-              full_name: 'سارة محمد جاسم',
-            } as any,
-          } as unknown as StudentSchoolHomework,
-        ]);
+        setSchoolHomeworks([]);
       }
     } catch {
-      // Keep state
+      setSchoolHomeworks([]);
     }
   };
 
   useEffect(() => {
     if (session) {
       fetchHomeworks();
+      fetchStudents();
     }
   }, [session, detectedSlug]);
 
@@ -613,6 +611,11 @@ export const TeacherMobileApp: React.FC = () => {
                 </div>
 
                 {/* Student Cards List */}
+                {loadingStudents ? (
+                  <div className="py-10 text-center text-xs text-slate-500 font-medium">
+                    جاري تحميل قائمة الطلاب...
+                  </div>
+                ) : (
                 <div className="space-y-2.5">
                   {filteredStudents.map((stu) => {
                     const hasHomeworks = stu.homeworksCount > 0;
@@ -668,6 +671,7 @@ export const TeacherMobileApp: React.FC = () => {
                     );
                   })}
                 </div>
+                )}
 
               </div>
 

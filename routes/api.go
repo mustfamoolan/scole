@@ -114,6 +114,8 @@ func RegisterAuthAndTenantRoutes(app *fiber.App) {
 	v1.Post("/auth/student-login", academicCtrl.StudentCodeLogin)
 	v1.Post("/auth/guardian-login", academicCtrl.GuardianCodeLogin)
 	v1.Post("/auth/teacher-login", academicCtrl.TeacherCodeLogin)
+	v1.Get("/portal/teacher/students", academicCtrl.GetPortalTeacherStudents)
+	v1.Get("/portal/student/teachers", academicCtrl.GetPortalStudentTeachers)
 
 	// Portal Homework & Submissions (Accessible by Student, Guardian, and Teacher apps)
 	v1.Post("/portal/homeworks/upload", homeworkCtrl.UploadAttachment)

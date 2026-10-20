@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { apiRequest } from '../../api/client';
 import { getCurrentTenantSubdomain } from '../../lib/tenant';
@@ -6,6 +6,7 @@ import { applyTenantTheme } from '../../lib/theme';
 import { PortalLoginScreen } from './PortalLoginScreen';
 import { HomeworkChatStream } from './HomeworkChatStream';
 import { SchoolBannerSlider } from './SchoolBannerSlider';
+import { StudentSchoolHomework } from '../../types';
 import {
   Users,
   GraduationCap,
@@ -16,7 +17,6 @@ import {
   MessageSquare,
   Sparkles,
   ArrowRight,
-  Megaphone,
   UserCheck,
 } from 'lucide-react';
 
@@ -99,58 +99,86 @@ export const GuardianMobileApp: React.FC = () => {
   // Slug selector fallback if opened on main domain
   const [instituteSlugInput, setInstituteSlugInput] = useState<string>('');
 
-  // Sample Institute Announcements & Notifications
-  const announcements = [
-    {
-      id: 'ann-1',
-      title: 'إعلان هام: بدء امتحانات نصف السنة',
-      content: 'نود إعلامكم بأن الامتحانات ستبدأ الأسبوع القادم، يرجى متابعة مراجعة الواجبات اليومية للأبناء.',
-      badge: 'عام',
-    },
-  ];
 
-  const notifications = [
-    {
-      id: 'notif-1',
-      title: 'ملاحظة من أستاذ الرياضيات',
-      desc: 'تم تدقيق واجب الرياضيات والحل ممتاز ومرتب.',
-      time: 'منذ ساعتين',
-    },
-    {
-      id: 'notif-2',
-      title: 'تسجيل الحضور الصباحي',
-      desc: 'حضر الطالب في الوقت المحدد لبدء الحصة الأولى.',
-      time: '08:15 ص',
-    },
-  ];
 
-  // Mock list of teachers for chat preview
-  const sampleTeachers = [
-    {
-      id: 't-1',
-      name: 'أ. حيدر الكعبي',
-      subject: 'مدرس الرياضيات',
-      lastMessage: 'أحسنت في حل تمارين الصفحة 45.',
-      time: '10:30 ص',
-      unread: 1,
-    },
-    {
-      id: 't-2',
-      name: 'ست مريم الموسوي',
-      subject: 'مدرسة اللغة الإنجليزية',
-      lastMessage: 'يرجى مراجعة كلمات الوحدة الثالثة.',
-      time: 'أمس',
-      unread: 0,
-    },
-    {
-      id: 't-3',
-      name: 'أ. علي التميمي',
-      subject: 'مدرس الفيزياء',
-      lastMessage: 'جاهز لأي استفسار بخصوص الدرس.',
-      time: 'الخميس',
-      unread: 0,
-    },
-  ];
+  interface TeacherItem {
+    id: string;
+    name: string;
+    subject: string;
+    specialization?: string;
+    phone?: string;
+    avatar_url?: string;
+  }
+
+  // Real Teachers & Homeworks States
+  const [teachers, setTeachers] = useState<TeacherItem[]>([]);
+  const [loadingTeachers, setLoadingTeachers] = useState<boolean>(false);
+  const [childHomeworks, setChildHomeworks] = useState<StudentSchoolHomework[]>([]);
+
+  // Fetch real teachers of the selected child
+  const fetchTeachers = async () => {
+    const activeChild = session?.students?.[selectedChildIndex];
+    if (!activeChild?.id) return;
+    setLoadingTeachers(true);
+    try {
+      const endpoint = detectedSlug
+        ? `/api/v1/portal/student/teachers?slug=${encodeURIComponent(detectedSlug)}&student_id=${activeChild.id}`
+        : `/api/v1/portal/student/teachers?student_id=${activeChild.id}`;
+      const res = await apiRequest<{ success: boolean; data: TeacherItem[] }>(endpoint, {
+        headers: detectedSlug ? { 'X-Tenant-Slug': detectedSlug } : undefined,
+      });
+      if (res?.data && Array.isArray(res.data)) {
+        setTeachers(res.data);
+      }
+    } catch {
+      // Graceful fallback
+    } finally {
+      setLoadingTeachers(false);
+    }
+  };
+
+  // Fetch selected child homeworks to extract live teacher feedback
+  const fetchChildHomeworks = async () => {
+    const activeChild = session?.students?.[selectedChildIndex];
+    if (!activeChild?.id) return;
+    try {
+      const endpoint = detectedSlug
+        ? `/api/v1/portal/school-homeworks?slug=${encodeURIComponent(detectedSlug)}&student_id=${activeChild.id}`
+        : `/api/v1/portal/school-homeworks?student_id=${activeChild.id}`;
+      const res = await apiRequest<{ success: boolean; data: StudentSchoolHomework[] }>(endpoint, {
+        headers: detectedSlug ? { 'X-Tenant-Slug': detectedSlug } : undefined,
+      });
+      if (res?.data && Array.isArray(res.data)) {
+        setChildHomeworks(res.data);
+      }
+    } catch {}
+  };
+
+  // Real dynamic notifications from teacher comments
+  const notifications = useMemo(() => {
+    const activeChild = session?.students?.[selectedChildIndex];
+    const childName = activeChild?.full_name || 'ابنك';
+    const list: { id: string; title: string; desc: string; time: string }[] = [];
+    childHomeworks.forEach((h) => {
+      if (h.teacher_comment) {
+        list.push({
+          id: `comment-${h.id}`,
+          title: `ملاحظة مدرس ${h.subject_name} حول ${childName}`,
+          desc: h.teacher_comment,
+          time: new Date(h.updated_at || h.created_at).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' }),
+        });
+      }
+    });
+    if (list.length === 0) {
+      list.push({
+        id: 'default-notif',
+        title: 'متابعة الواجبات المدرسية',
+        desc: `يمكنك رفع وتصوير واجبات ${childName} ومتابعة ردود المعلمين وتصحيحهم للدفتر فوراً.`,
+        time: 'اليوم',
+      });
+    }
+    return list;
+  }, [childHomeworks, session, selectedChildIndex]);
 
   // 1. Fetch Tenant Context
   useEffect(() => {
@@ -204,7 +232,11 @@ export const GuardianMobileApp: React.FC = () => {
     if (session?.tenant?.primary_color) {
       applyTenantTheme(session.tenant.primary_color);
     }
-  }, [session]);
+    if (session) {
+      fetchTeachers();
+      fetchChildHomeworks();
+    }
+  }, [session, selectedChildIndex]);
 
   // Handle Login by Access Code
   const handleCodeLogin = async (e: React.FormEvent) => {
@@ -533,43 +565,52 @@ export const GuardianMobileApp: React.FC = () => {
                 </span>
               </div>
 
-              {/* Chat list items */}
+              {/* Real Teachers list items */}
               <div className="space-y-2">
-                {sampleTeachers.map((t) => (
-                  <div
-                    key={t.id}
-                    onClick={() => setSelectedTeacherChat(t)}
-                    className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between shadow-2xs hover:border-primary/40 transition cursor-pointer active:scale-98"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-sm shrink-0">
-                        {t.name.charAt(2)}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                            {t.name}
-                          </h4>
-                          <span className="text-[10px] text-slate-400">({t.subject})</span>
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px] mt-0.5">
-                          {t.lastMessage}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="text-left shrink-0">
-                      <span className="text-[10px] text-slate-400 font-mono block mb-1">
-                        {t.time}
-                      </span>
-                      {t.unread > 0 && (
-                        <span className="w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
-                          {t.unread}
-                        </span>
-                      )}
-                    </div>
+                {loadingTeachers ? (
+                  <div className="p-8 text-center text-xs text-slate-400">
+                    جاري تحميل قائمة مدرسي المواد...
                   </div>
-                ))}
+                ) : teachers.length === 0 ? (
+                  <div className="p-8 text-center bg-white dark:bg-slate-800 rounded-3xl border border-slate-200/80 dark:border-slate-800 text-xs text-slate-500">
+                    لم يتم تسجيل كادر تدريسي لمواد ابنك حتى الآن
+                  </div>
+                ) : (
+                  teachers.map((t) => (
+                    <div
+                      key={t.id}
+                      onClick={() => setSelectedTeacherChat(t)}
+                      className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between shadow-2xs hover:border-primary/40 transition cursor-pointer active:scale-98"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-sm shrink-0">
+                          {t.avatar_url ? (
+                            <img src={t.avatar_url} alt={t.name} className="w-full h-full object-cover rounded-full" />
+                          ) : (
+                            t.name.replace('أ. ', '').charAt(0)
+                          )}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                              {t.name}
+                            </h4>
+                            <span className="text-[10px] text-slate-400">({t.subject})</span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px] mt-0.5">
+                            {t.specialization || t.subject}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-left shrink-0">
+                        <span className="text-[10px] text-primary font-bold">
+                          محادثة
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}

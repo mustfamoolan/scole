@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate, useParams } from 'react-router-dom';
 import { apiRequest } from '../../api/client';
 import { getCurrentTenantSubdomain } from '../../lib/tenant';
@@ -6,6 +6,7 @@ import { applyTenantTheme } from '../../lib/theme';
 import { PortalLoginScreen } from './PortalLoginScreen';
 import { HomeworkChatStream } from './HomeworkChatStream';
 import { SchoolBannerSlider } from './SchoolBannerSlider';
+import { StudentSchoolHomework } from '../../types';
 import {
   GraduationCap,
   Bell,
@@ -15,7 +16,6 @@ import {
   MessageSquare,
   Sparkles,
   ArrowRight,
-  Megaphone,
   BookCheck,
 } from 'lucide-react';
 
@@ -90,59 +90,83 @@ export const StudentMobileApp: React.FC = () => {
   // Slug selector fallback if opened on main domain
   const [instituteSlugInput, setInstituteSlugInput] = useState<string>('');
 
-  // Sample Institute Announcements
-  const announcements = [
-    {
-      id: 'ann-1',
-      title: 'إعلان المعهد: جدول الدروس والواجبات',
-      content: 'يرجى من جميع الطلاب رفع صور دفاتر الواجبات يومياً عبر التطبيق لتدقيقها من قِبل المدرسين.',
-      badge: 'عام',
-    },
-  ];
+  interface TeacherItem {
+    id: string;
+    name: string;
+    subject: string;
+    specialization?: string;
+    phone?: string;
+    avatar_url?: string;
+    lastMessage?: string;
+    time?: string;
+    unread?: number;
+  }
 
-  // Sample Notifications
-  const notifications = [
-    {
-      id: 'notif-1',
-      title: 'واجب اللغة الإنجليزية',
-      desc: 'تم وضع تدريب جديد لقواعد الوحدة الثالثة، يرجى كتابة الحل ورفعه.',
-      time: 'منذ ساعة',
-    },
-    {
-      id: 'notif-2',
-      title: 'توجيه من أستاذ الرياضيات',
-      desc: 'أحسنت في حل مسائل أمس، استمر على هذا التميز.',
-      time: 'أمس',
-    },
-  ];
+  // Real Teachers & Homeworks States
+  const [teachers, setTeachers] = useState<TeacherItem[]>([]);
+  const [loadingTeachers, setLoadingTeachers] = useState<boolean>(false);
+  const [studentHomeworks, setStudentHomeworks] = useState<StudentSchoolHomework[]>([]);
 
-  // Sample Teachers for student direct chat preview
-  const sampleTeachers = [
-    {
-      id: 't-1',
-      name: 'أ. حيدر الكعبي',
-      subject: 'مدرس الرياضيات',
-      lastMessage: 'ممتاز! راجع المسألة الأخيرة ص 46.',
-      time: '11:15 ص',
-      unread: 1,
-    },
-    {
-      id: 't-2',
-      name: 'ست مريم الموسوي',
-      subject: 'مدرسة اللغة الإنجليزية',
-      lastMessage: 'احرص على إرسال دفتر التمارين اليوم.',
-      time: 'أمس',
-      unread: 0,
-    },
-    {
-      id: 't-3',
-      name: 'أ. علي التميمي',
-      subject: 'مدرس الفيزياء',
-      lastMessage: 'التجربة العملية ستكون في المختبر غداً.',
-      time: 'الأربعاء',
-      unread: 0,
-    },
-  ];
+  // Fetch real teachers from server
+  const fetchTeachers = async () => {
+    if (!session?.student?.id) return;
+    setLoadingTeachers(true);
+    try {
+      const endpoint = detectedSlug
+        ? `/api/v1/portal/student/teachers?slug=${encodeURIComponent(detectedSlug)}&student_id=${session.student.id}`
+        : `/api/v1/portal/student/teachers?student_id=${session.student.id}`;
+      const res = await apiRequest<{ success: boolean; data: TeacherItem[] }>(endpoint, {
+        headers: detectedSlug ? { 'X-Tenant-Slug': detectedSlug } : undefined,
+      });
+      if (res?.data && Array.isArray(res.data)) {
+        setTeachers(res.data);
+      }
+    } catch {
+      // Graceful fallback
+    } finally {
+      setLoadingTeachers(false);
+    }
+  };
+
+  // Fetch student homeworks to extract live teacher feedback notifications
+  const fetchStudentHomeworks = async () => {
+    if (!session?.student?.id) return;
+    try {
+      const endpoint = detectedSlug
+        ? `/api/v1/portal/school-homeworks?slug=${encodeURIComponent(detectedSlug)}&student_id=${session.student.id}`
+        : `/api/v1/portal/school-homeworks?student_id=${session.student.id}`;
+      const res = await apiRequest<{ success: boolean; data: StudentSchoolHomework[] }>(endpoint, {
+        headers: detectedSlug ? { 'X-Tenant-Slug': detectedSlug } : undefined,
+      });
+      if (res?.data && Array.isArray(res.data)) {
+        setStudentHomeworks(res.data);
+      }
+    } catch {}
+  };
+
+  // Real dynamic notifications from teacher feedback
+  const notifications = useMemo(() => {
+    const list: { id: string; title: string; desc: string; time: string }[] = [];
+    studentHomeworks.forEach((h) => {
+      if (h.teacher_comment) {
+        list.push({
+          id: `comment-${h.id}`,
+          title: `توجيه وتقييم: ${h.subject_name}`,
+          desc: h.teacher_comment,
+          time: new Date(h.updated_at || h.created_at).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' }),
+        });
+      }
+    });
+    if (list.length === 0) {
+      list.push({
+        id: 'default-notif',
+        title: 'مرحباً بك في المنصة التعليمية',
+        desc: 'ارفع صور دفتر الواجب اليومي وسيقوم مدرس المادة بتدقيقها وإرسال الملاحظات هنا فوراً.',
+        time: 'اليوم',
+      });
+    }
+    return list;
+  }, [studentHomeworks]);
 
   // 1. Fetch Tenant Context
   useEffect(() => {
@@ -195,6 +219,10 @@ export const StudentMobileApp: React.FC = () => {
   useEffect(() => {
     if (session?.tenant?.primary_color) {
       applyTenantTheme(session.tenant.primary_color);
+    }
+    if (session) {
+      fetchTeachers();
+      fetchStudentHomeworks();
     }
   }, [session]);
 
@@ -476,43 +504,52 @@ export const StudentMobileApp: React.FC = () => {
                 </span>
               </div>
 
-              {/* Chat list items */}
+              {/* Real Teachers list items */}
               <div className="space-y-2">
-                {sampleTeachers.map((t) => (
-                  <div
-                    key={t.id}
-                    onClick={() => setSelectedTeacherChat(t)}
-                    className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between shadow-2xs hover:border-primary/40 transition cursor-pointer active:scale-98"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-sm shrink-0">
-                        {t.name.charAt(2)}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                            {t.name}
-                          </h4>
-                          <span className="text-[10px] text-slate-400">({t.subject})</span>
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px] mt-0.5">
-                          {t.lastMessage}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="text-left shrink-0">
-                      <span className="text-[10px] text-slate-400 font-mono block mb-1">
-                        {t.time}
-                      </span>
-                      {t.unread > 0 && (
-                        <span className="w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] font-bold flex items-center justify-center">
-                          {t.unread}
-                        </span>
-                      )}
-                    </div>
+                {loadingTeachers ? (
+                  <div className="p-8 text-center text-xs text-slate-400">
+                    جاري تحميل قائمة مدرسي المواد...
                   </div>
-                ))}
+                ) : teachers.length === 0 ? (
+                  <div className="p-8 text-center bg-white dark:bg-slate-800 rounded-3xl border border-slate-200/80 dark:border-slate-800 text-xs text-slate-500">
+                    لم يتم تسجيل كادر تدريسي لموادك حتى الآن
+                  </div>
+                ) : (
+                  teachers.map((t) => (
+                    <div
+                      key={t.id}
+                      onClick={() => setSelectedTeacherChat(t)}
+                      className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between shadow-2xs hover:border-primary/40 transition cursor-pointer active:scale-98"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-full bg-primary/15 text-primary flex items-center justify-center font-bold text-sm shrink-0">
+                          {t.avatar_url ? (
+                            <img src={t.avatar_url} alt={t.name} className="w-full h-full object-cover rounded-full" />
+                          ) : (
+                            t.name.replace('أ. ', '').charAt(0)
+                          )}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                              {t.name}
+                            </h4>
+                            <span className="text-[10px] text-slate-400">({t.subject})</span>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px] mt-0.5">
+                            {t.specialization || t.subject}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-left shrink-0">
+                        <span className="text-[10px] text-primary font-bold">
+                          محادثة
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
